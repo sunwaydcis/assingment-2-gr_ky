@@ -2,6 +2,7 @@ import scala.io.Source
 import java.io.File
 import scala.language.postfixOps
 
+
 // 1. Data Model and Utilities
 
 // Case Class for Immutable Data Model
@@ -13,6 +14,7 @@ case class Booking(
                   profitMargin: Double
 ) {
   def netCustomerCost: Double = bookingPrice * (1.0 - discount)
+  def profitPerBooking: Double = bookingPrice * profitMargin
 }
 
 object Utils {
@@ -21,7 +23,7 @@ object Utils {
 
   def safeParseDiscount(discountStr: String): Double = {
     try {
-      discountStr.replace("%", "").trim.toDouble / 100
+      discountStr.replace("%", "").trim.toDouble / 100.0
     } catch {
       case _: Throwable => 0.0
     }
@@ -30,18 +32,18 @@ object Utils {
 
 // 2. Encalsulation: Data Processor
 
-class HotelDataProcessor(filePatch: String) {
+class HotelDataProcessor(filePath: String) {
   import Utils._
 
   private val processedData: List[Booking] = loadData()
 
-  def getAllBooking: List[Booking] = processedData
+  def getAllBookings: List[Booking] = processedData
 
   private def loadData() : List[Booking] = {
     try {
       val lines = Source.fromFile(filePath).getLines().drop(1)
       lines.toList.flatMap { line =>
-        val cols = line.split(",(?=([^\"]\"[^\"]\")[^\"]$)").map(_.trim)
+        val cols = line.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)").map(_.trim)
 
         if (cols.length >= 24){
           try {
@@ -72,7 +74,7 @@ class HotelDataProcessor(filePatch: String) {
 
 //3. Polymorphism: Analysis Traits and Implementations
 
-trait AnalysiaReport {
+trait AnalysisReport {
   def analyze(bookings: List[Booking]): Unit
 }
 
@@ -84,12 +86,81 @@ class CountryAnalysis extends AnalysisReport {
       .mapValues(_.size)
       .maxByOption { case (_, count) => count }
     
-    println("\n[1. Highest Number of Bookings Analysis")
+    println("\n[1. Highest Number of Bookings Analysis]")
     result match {
       case Some((country, count)) =>
-        println(s" - Country: *$country*")
-        println(s" - Country: *$count*")
+        println(s" - Country: **$country**")
+        println(s" - Bookings: **$count**")
       case None => println("- No data available.")
     }
   }
+}
+
+// Q2: Most economical hotel
+class EconomicalAnalysis extends AnalysisReport{
+  def analyze(bookings: List[Booking]):Unit={
+    val result = bookings
+      .groupBy(_.hotelName)
+      .mapValues(list => list.map(_.netCustomerCost).min)
+      .minByOption {case(_,minNetCost)=> minNetCost}
+    
+    println("\n[2. Most Economical Hotel Analysis]")
+    result match{
+      case Some((hotel,cost))=>
+        println(f"-Hotel: **$hotel**")
+        println(f"-Minimum Net Customer Cost: **SGD $cost%.2f**")
+      case None => println("-No data available.")  
+    }
+  }
+}
+
+// Q3: Most profitable hotel
+class ProfitAnalysis extends AnalysisReport{
+  def analyze(bookings:List[Booking]): Unit={
+    val result = bookings
+      .groupBy(_.hotelName)
+      .mapValues(hotelBookings => hotelBookings.map(_.profitPerBooking).sum)
+      .maxByOption{case(_, totalProfit)=>totalProfit }
+    
+    println("\n[3. Most Profitable Hotel Analysis]")
+    result match{
+      case Some((hotel, profit))=>
+        println(f"-Hotel: **$hotel**")
+        println(f"-Total Estimated Profit: **SGD $profit%.2f**")
+      case None => println("-No data available.")  
+    }
+  }
+}
+
+class AnalysisRunner(analyses: List[AnalysisReport]) {
+  def runReport(bookings: List[Booking]):Unit={
+    println("---Hotel Booking Analysis Report---")
+    analyses.foreach(report => report.analyze(bookings))
+    
+    println("-----------------------------------")
+  }
+}
+
+object Main {
+  def main(args: Array[String]):Unit={
+    val filePath = "Hotel_Dataset.csv"
+    
+    val dataProcessor = new HotelDataProcessor(filePath)
+    val allBookings = dataProcessor.getAllBookings
+    
+    if(allBookings.isEmpty){
+      println("Analysis failed: Could not load data or data is empty.")
+      return
+    }
+    
+    val fullReportAnalyses: List[AnalysisReport]=List(
+      new CountryAnalysis,
+      new EconomicalAnalysis,
+      new ProfitAnalysis
+    )
+    
+    val runner = new AnalysisRunner(fullReportAnalyses)
+    runner.runReport(allBookings)
+  }
+  
 }
