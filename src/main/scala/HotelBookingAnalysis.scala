@@ -73,12 +73,11 @@ class HotelDataProcessor(filePath: String) {
             val countryDestination = cols(9).replaceAll("\"", "")
             val price = safeToDouble(cols(20))
             val discountRatio = safeParseDiscount(cols(21))
-            val profit = safeToDouble(cols(23))
-
+            val profit = safeToDouble(cols(23).replaceAll("\"","").trim)
             val days = safeToInt(cols(13))
             val rooms = safeToInt(cols(15))
 
-            if (country.nonEmpty && price > 0)
+            if (countryOrigin.nonEmpty && price > 0)
               Some(Booking(hotel, countryOrigin, countryDestination, price, discountRatio, profit, days, rooms))
             else
               None
@@ -102,20 +101,20 @@ class HotelDataProcessor(filePath: String) {
 //3. Polymorphism: Analysis Traits and Implementations
 
 case class Q2GlobalBounds(
-                           priceMin: Double, priceMax: Double,
-                           discountMin: Double, discountMax: Double
-profitMin: Double, profitMax: Double
+  priceMin: Double, priceMax: Double,
+  discountMin: Double, discountMax: Double,
+  profitMin: Double, profitMax: Double
 )
 
 case class Q3GlobalBounds(
-                           visitorsMin: Double, visitorsMax: Double,
-                           avgProfitMin: Double, avgProfitMax: Double
-                         )
+  visitorsMin: Double, visitorsMax: Double,
+  avgProfitMin: Double, avgProfitMax: Double
+)
 
 object ScoringEngine {
   def normalize(value: Double, min: Double, max: Double): Double = {
     if (max - min == 0) 0.0
-    else (vavlue - min) / (max - min) * 100.0
+    else (value - min) / (max - min) * 100.0
   }
 
   //Q2: Calculate global bounds for Price Per Room Per Day, Discount, and Profit Margin
@@ -137,7 +136,7 @@ object ScoringEngine {
     val avgProfits = hotelMetrics.values.map(_._2)
 
     Q3GlobalBounds(
-      visitorMin = visitorCounts.min, visitorMax = visitorCounts.max,
+      visitorsMin = visitorCounts.min, visitorsMax = visitorCounts.max,
       avgProfitMin = avgProfits.min, avgProfitMax = avgProfits.max
     )
   }
@@ -151,7 +150,7 @@ trait AnalysisReport {
 class CountryAnalysis extends AnalysisReport {
   def analyze(bookings: List[Booking]): Unit = {
     val result = bookings
-      .groupBy(_.originCountry)
+      .groupBy(_.destinationCountry)
       .mapValues(_.size)
       .maxByOption { case (_, count) => count }
 
@@ -167,17 +166,42 @@ class CountryAnalysis extends AnalysisReport {
 
 // Q2: Most economical hotel
 class EconomicalAnalysis extends AnalysisReport{
-  def analyze(bookings: List[Booking]):Unit={
-    val result = bookings
-      .groupBy(_.hotelName)
-      .mapValues(list => list.map(_.netCustomerCost).min)
-      .minByOption {case(_,minNetCost)=> minNetCost}
+  import ScoringEngine._
+
+  def analyze(bookings: List[Booking]): Unit={
+    if(bookings.isEmpty) return println("-No data available.")
+
+    val bounds = calculateQ2Bounds(bookings)
+
+    val scoredBookings = bookings.map{ b=>
+      // 1. Score Price:
+      val priceRaw = normalize(b.pricePerRoomPerDay, bounds.priceMin, bounds.priceMax)
+      val priceScore = 100.0 - priceRaw
+
+      // 2. Score Discount:
+      val discountScore = normalize(b.discount, bounds.discountMin, bounds.discountMax)
+
+      // 3. Score Profit Margin:
+      val profitScore = normalize (b.profitMargin, bounds.profitMin, bounds.profitMax)
+
+      // 4. Final Score:
+      val averageScore = (priceScore + discountScore + profitScore) / 3.0
+
+      (b.hotelName, averageScore)
+    }
+
+    // 5. Final step:
+    val hotelScores = scoredBookings
+      .groupBy(_._1)
+      .mapValues(scores => scores.map(_._2).sum/scores.size)
+
+    val mostEconomical = hotelScores.maxByOption(_._2)
 
     println("\n[2. Most Economical Hotel Analysis]")
-    result match{
-      case Some((hotel,cost))=>
+    mostEconomical match{
+      case Some((hotel,score)) =>
         println(f"-Hotel: **$hotel**")
-        println(f"-Minimum Net Customer Cost: **SGD $cost%.2f**")
+        println(f"-Highest Average Score: **$score%.2f** (out of 100)")
       case None => println("-No data available.")
     }
   }
@@ -185,17 +209,41 @@ class EconomicalAnalysis extends AnalysisReport{
 
 // Q3: Most profitable hotel
 class ProfitAnalysis extends AnalysisReport{
+  import ScoringEngine._
+
   def analyze(bookings:List[Booking]): Unit={
-    val result = bookings
+    if(bookings.isEmpty) return println("-No data available.")
+
+    val hotelMetrics = bookings
       .groupBy(_.hotelName)
-      .mapValues(hotelBookings => hotelBookings.map(_.profitPerBooking).sum)
-      .maxByOption{case(_, totalProfit)=>totalProfit }
+      .mapValues{ list =>
+        val visitorCount = list.size
+        val avgProfitMargin = list.map(_.profitMargin).sum/list.size
+        (visitorCount, avgProfitMargin)
+      }
+      .toMap
+
+    val bounds = ScoringEngine.calculateQ3Bounds(hotelMetrics)
+
+    val finalScores = hotelMetrics.map{ case(hotel,(visitor, avgProfit)) =>
+      // 1. Normalize visitors
+      val visitorScore = normalize(visitor.toDouble, bounds.visitorsMin, bounds.visitorsMax)
+
+      // 2. Normalize Avg Profit Margin
+      val profitScore = normalize(avgProfit, bounds.avgProfitMin, bounds.avgProfitMax)
+
+      // 3. Final Score
+      val finalScore = (visitorScore + profitScore) / 2.0
+
+      (hotel, finalScore)
+    }
+    val mostProfitable = finalScores.maxByOption(_._2)
 
     println("\n[3. Most Profitable Hotel Analysis]")
-    result match{
-      case Some((hotel, profit))=>
+    mostProfitable match{
+      case Some((hotel, score))=>
         println(f"-Hotel: **$hotel**")
-        println(f"-Total Estimated Profit: **SGD $profit%.2f**")
+        println(f"-Highest Normalized Score: **$score%.2f** (out of 100)")
       case None => println("-No data available.")
     }
   }
