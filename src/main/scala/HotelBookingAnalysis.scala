@@ -50,33 +50,69 @@ class HotelDataProcessor(filePath: String) {
 
   private def loadData(): List[Booking] = {
     val file = new File(filePath)
-    if (!file.exists()) return List.empty
+    if (!file.exists()) {
+      println(s"CRITICAL ERROR: File not found at path: ${file.getAbsolutePath}")
+      return List.empty
+    }
 
     var reader: BufferedReader = null
     try {
       reader = new BufferedReader(new FileReader(file))
-      val lines = Iterator.continually(reader.readLine()).takeWhile(_ != null).drop(1).toList
+
+      val headerLine = reader.readLine()
+      val headers = headerLine
+        .split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)")
+        .map(_.trim.replaceAll("\"", ""))
+
+      /*println("\n==== CSV HEADERS FOUND ====")
+      headers.foreach(h => println(s"[$h]"))
+      println("=============================\n")*/
+
+      val index = headers.zipWithIndex.toMap
+      def col(name: String): Int=
+        index.getOrElse(name, throw new RuntimeException(s"Missing column: $name"))
+
+      val lines = Iterator.continually(reader.readLine()).takeWhile(_ != null).toList
 
       lines.flatMap { line =>
-        val cols = line.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)").map(_.trim)
-        if (cols.length >= 24) {
+        val cols = line
+          .split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)")
+          .map(_.trim.replaceAll("\"",""))
+
           try {
-            Some(
-              Booking(
-                hotelName = cols(16).replaceAll("\"", ""),
-                originCountry = cols(6).replaceAll("\"", ""),
-                destinationCountry = cols(9).replaceAll("\"", ""),
-                destinationCity = cols(10).replaceAll("\"", ""),
-                bookingPrice = safeToDouble(cols(20)),
-                discount = safeParseDiscount(cols(21)),
-                profitMargin = safeToDouble(cols(23).replaceAll("\"", "")),
-                noOfDays = safeToInt(cols(13)),
-                rooms = safeToInt(cols(15))
-              )
-            )
-          } catch { case _: Throwable => None }
-        } else None
-      }
+            val hotel = cols(col("Hotel Name"))
+            val origin = cols(col("Origin Country"))
+            val destination = cols(index("Destination Country"))
+            val city = cols(col("Destination City"))
+            val price = Utils.safeToDouble(cols(col("Booking Price[SGD]")))
+            val discount = Utils.safeParseDiscount(cols(col("Discount")))
+            val profit = Utils.safeToDouble(cols(col("Profit Margin")))
+            val days = Utils.safeToInt(cols(col("No of Days")))
+            val rooms = Utils.safeToInt(cols(col("Rooms")))
+
+            if(hotel.nonEmpty && destination.nonEmpty && price > 0)
+              Some(Booking(
+                hotelName = hotel,
+                originCountry = origin,
+                destinationCountry = destination,
+                destinationCity = city,
+                bookingPrice = price,
+                discount = discount,
+                profitMargin = profit,
+                noOfDays = days,
+                rooms = rooms
+              ))
+            else None
+          } catch {
+            case e: Throwable =>
+              println(s"Row skipped due to error: ${e.getMessage}")
+              None
+          }
+        }
+      } catch {
+      case e: Exception =>
+        println(s"Error loading data: ${e.getMessage}")
+        List.empty
     } finally {
       if (reader != null) reader.close()
     }
@@ -99,6 +135,13 @@ trait AnalysisReport {
 //Q1: Country with the highest number of bookings
 class CountryAnalysis extends AnalysisReport {
   def analyze(bookings: List[Booking]): Unit = {
+
+    if (bookings.isEmpty) {
+      println("\n[1. Highest Number of Bookings Analysis]")
+      println("- No data available.")
+      return
+    }
+
     val result = bookings
       .groupBy(_.destinationCountry)
       .view.mapValues(_.size).toMap
@@ -117,9 +160,19 @@ class EconomicalAnalysis extends AnalysisReport{
   import ScoringEngine._
 
   def analyze(bookings: List[Booking]): Unit={
+    if (bookings.isEmpty) {
+      println("No data available.")
+      return
+    }
 
     val hotelGroups =
       bookings.groupBy(b => (b.destinationCountry, b.hotelName, b.destinationCity))
+
+    if (hotelGroups.isEmpty){
+      println("\n[2. Most Economical Hotel Analysis]")
+      println("No valid hotel groups found.")
+      return
+    }
 
     val hotelAverages = hotelGroups.map { case (key, list) =>
       val avgPrice = list.map(_.pricePerRoomPerDay).sum / list.size
@@ -128,9 +181,15 @@ class EconomicalAnalysis extends AnalysisReport{
       key -> (avgPrice, avgDisc, avgProfit)
     }
 
-    val prices = hotelAverages.values.map(_._1)
-    val discs = hotelAverages.values.map(_._2)
-    val profits = hotelAverages.values.map(_._3)
+    val prices = hotelAverages.values.map(_._1).toList
+    val discs = hotelAverages.values.map(_._2).toList
+    val profits = hotelAverages.values.map(_._3).toList
+
+    if(prices.isEmpty || discs.isEmpty || profits.isEmpty){
+      println("\n[2. Most Economical Hotel Analysis]")
+      println("- Insufficient data after processing.")
+      return
+    }
 
     val minP = prices.min; val maxP = prices.max
     val minD = discs.min; val maxD = discs.max
@@ -161,8 +220,20 @@ class ProfitAnalysis extends AnalysisReport {
 
   def analyze(bookings: List[Booking]): Unit = {
 
+    if (bookings.isEmpty) {
+      println("\n[3. Most Profitable Hotel Analysis]")
+      println("- No data available.")
+      return
+    }
+
     val hotelGroups =
       bookings.groupBy(b => (b.destinationCountry, b.hotelName, b.destinationCity))
+
+    if (hotelGroups.isEmpty) {
+      println("\n[3. Most Profitable Hotel Analysis]")
+      println("- No valid hotel groups found.")
+      return
+    }
 
     val hotelStats = hotelGroups.map { case (key, list) =>
       val visitors = list.size
