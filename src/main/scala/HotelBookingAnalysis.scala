@@ -77,18 +77,18 @@ class HotelDataProcessor(filePath: String) {
       lines.flatMap { line =>
         val cols = line
           .split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)")
-          .map(_.trim.replaceAll("\"",""))
+          .map(_.trim)
 
           try {
-            val hotel = cols(col("Hotel Name"))
-            val origin = cols(col("Origin Country"))
-            val destination = cols(index("Destination Country"))
-            val city = cols(col("Destination City"))
-            val price = Utils.safeToDouble(cols(col("Booking Price[SGD]")))
-            val discount = Utils.safeParseDiscount(cols(col("Discount")))
-            val profit = Utils.safeToDouble(cols(col("Profit Margin")))
-            val days = Utils.safeToInt(cols(col("No of Days")))
-            val rooms = Utils.safeToInt(cols(col("Rooms")))
+            val hotel = cols(col("Hotel Name")).replaceAll("\"", "")
+            val origin = cols(col("Origin Country")).replaceAll("\"", "")
+            val destination = cols(index("Destination Country")).replaceAll("\"", "")
+            val city = cols(col("Destination City")).replaceAll("\"", "")
+            val price = Utils.safeToDouble(cols(col("Booking Price[SGD]")).replaceAll("\"", ""))
+            val discount = Utils.safeParseDiscount(cols(col("Discount")).replaceAll("\"", ""))
+            val profit = Utils.safeToDouble(cols(col("Profit Margin")).replaceAll("\"", ""))
+            val days = Utils.safeToInt(cols(col("No of Days")).replaceAll("\"", ""))
+            val rooms = Utils.safeToInt(cols(col("Rooms")).replaceAll("\"", ""))
 
             if(hotel.nonEmpty && destination.nonEmpty && price > 0)
               Some(Booking(
